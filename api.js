@@ -163,7 +163,8 @@ async function callWithToken(payload) {
   // 그사이 다른 번호로 새로 로그인했다면 새 토큰은 지우지 않는다.
   if (!res.ok && res.error === "AUTH_REQUIRED" && getToken() === token) {
     clearSession();
-    if (authRequiredHandler) authRequiredHandler();
+    // 서버가 보낸 이유(예: "비밀번호가 초기화되어…")를 화면에 넘긴다.
+    if (authRequiredHandler) authRequiredHandler({ message: res.message || null });
   }
   return res;
 }

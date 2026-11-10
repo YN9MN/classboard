@@ -389,6 +389,7 @@ function showLogin(opts) {
     regPanel.hidden = !isReg;
   }
 
+  let preferApplied = false;
   function applyRegInfo() {
     const open = Boolean(regInfo && regInfo.open);
     tabs.hidden = !open;
@@ -400,6 +401,13 @@ function showLogin(opts) {
     if (regInfo.from != null && regInfo.to != null) {
       regRange.textContent = `지금 ${regInfo.from}~${regInfo.to}번 학생의 처음 등록을 받고 있어요.`;
       regNumber.placeholder = `예: ${regInfo.from}`;
+    }
+    // 비밀번호가 초기화돼 다시 등록해야 하는 경우, 처음 한 번만 [처음 등록] 탭으로 옮기고 번호를 채워 둔다.
+    if (opts && opts.preferRegister && !preferApplied) {
+      preferApplied = true;
+      selectTab("reg");
+      if (saved && !regNumber.value) regNumber.value = String(saved);
+      if (opts.message) say(regMsg, opts.message, opts.tone || "info"); // 로그인 탭의 안내는 가려지므로 여기에도 보여 준다
     }
   }
 
@@ -772,8 +780,11 @@ function start() {
     showSetupNeeded();
     return;
   }
-  api.onAuthRequired(() => {
-    if (screen !== "login") showLogin({ message: "로그인이 풀렸어요. 다시 로그인해 주세요.", tone: "info" });
+  api.onAuthRequired((info) => {
+    if (screen === "login") return;
+    const message = (info && info.message) || "로그인이 풀렸어요. 다시 로그인해 주세요.";
+    // 선생님이 비밀번호를 초기화한 경우: 등록이 열려 있으면 [처음 등록] 탭을 바로 보여 준다.
+    showLogin({ message, tone: "info", preferRegister: message.indexOf("초기화") !== -1 });
   });
   if (api.hasSession()) showBoard(null);
   else showLogin(null);
