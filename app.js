@@ -1,4 +1,5 @@
-// 학생 화면 로직 (단계 2: 로그인·처음 등록 · 공지판 · 공지 상세 · 항목 체크 · 공지 바로가기 링크)
+// 학생 화면 로직 (단계 2: 로그인·처음 등록 · 공지판 · 공지 상세 · 항목 체크 · 공지 바로가기 링크
+//                  단계 3: 제출 표시 · 투표 · 한 줄 메모 · 마감 지난 응답 읽기 전용)
 // 서버와 주고받는 일은 전부 api.js가 맡고, 이 파일은 화면만 다룬다.
 // 서버에서 온 글은 항상 글자(textContent)로만 넣는다. innerHTML은 쓰지 않는다.
 // 옛 휴대폰 브라우저를 생각해 ?. 와 ?? 문법은 쓰지 않는다.
@@ -12,6 +13,8 @@ const SOON_MS = 72 * 60 * 60 * 1000; // [마감 임박] 탭: 마감까지 72시�
 const STALE_MS = 60 * 1000; // 공지판으로 돌아왔을 때 목록이 이보다 오래됐으면 뒤에서 새로 받는다
 const DAY_MS = 24 * 60 * 60 * 1000;
 const KST_MS = 9 * 60 * 60 * 1000; // 한국 시각 = UTC+9 (서머타임 없음)
+const MEMO_MAX = 100; // 한 줄 메모·의견 글자 수(서버와 같음)
+const SHORT_CHOICE = 8; // 선택지가 모두 이 글자 수 이하면 2열 타일, 하나라도 길면 1열
 
 const CATEGORIES = ["일반", "수행평가", "학교행사", "가정통신문", "제출물"];
 const CATEGORY_CLASS = { 일반: "cat-1", 수행평가: "cat-2", 학교행사: "cat-3", 가정통신문: "cat-4", 제출물: "cat-5" };
@@ -191,6 +194,8 @@ const ICONS = {
   close: { parts: [["p", "M6 6l12 12M18 6L6 18"]] },
   search: { parts: [["c", 11, 11, 7], ["p", "M20 20l-4-4"]] },
   inbox: { parts: [["p", "M4 13h4l2 3h4l2-3h4"], ["p", "M5.5 5h13L21 13v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5z"]] },
+  file: { parts: [["p", "M7 3h7l4 4v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"], ["p", "M14 3v4h4M9 12h6M9 16h4"]] },
+  undo: { parts: [["p", "M9 14L4 9l5-5"], ["p", "M4 9h10a6 6 0 0 1 0 12h-3"]] },
 };
 
 function icon(name, size) {
@@ -969,11 +974,11 @@ function applyBoard(res) {
   const byId = new Map();
   notices.forEach((n) => byId.set(n.id, n));
   // 이번 로그인에서 학생이 만진 체크는 화면 상태를 그대로 둔다(저장 중인 것이 서버 목록보다 최신일 수 있음).
-  // 다만 공지가 사라졌거나, 항목이 바뀌었거나, 마감됐으면 서버 기록으로 다시 맞춘다.
+  // 다만 공지가 사라졌거나, 유형·항목·메모 허용이 바뀌었거나, 마감됐으면 서버 기록으로 다시 맞춘다.
   entries.forEach((entry, id) => {
     const n = byId.get(id);
     if (!n) entries.delete(id);
-    else if (!entry.inFlight && (n.closed || itemsOf(n).join("\n") !== entry.items.join("\n"))) entries.delete(id);
+    else if (!entry.inFlight && (n.closed || noticeSig(n) !== entry.sig)) entries.delete(id);
   });
   board = {
     number: res.number != null ? res.number : api.getSavedNumber(),
@@ -1035,8 +1040,49 @@ function itemsOf(notice) {
   return Array.isArray(notice.items) ? notice.items.map(String) : [];
 }
 
-function isChecklist(notice) {
-  return notice.type === "CHECKLIST" && itemsOf(notice).length > 0;
+// 이 화면이 다룰 응답 모양
+//   CHECKLIST 항목 체크 · SUBMIT 제출 표시 · POLL 투표 · READONLY 읽기만(항목 없는 체크 공지) · null 이 화면이 모르는 유형
+function kindOf(notice) {
+  const count = itemsOf(notice).length;
+  if (notice.type === "CHECKLIST") return count > 0 ? "CHECKLIST" : "READONLY";
+  if (notice.type === "SUBMIT") return "SUBMIT";
+  if (notice.type === "POLL") return count > 0 ? "POLL" : null;
+  return null;
+}
+
+// 공지의 응답 모양이 바뀌었는지 알아보는 표시(유형·메모 허용·항목)
+function noticeSig(notice) {
+  return [notice.type, notice.memoAllowed ? "memo" : ""].concat(itemsOf(notice)).join("\n");
+}
+
+// 한 줄 메모 정리: 서버(api_memo_)와 똑같이 줄바꿈·제어 글자를 공백으로, 공백 여러 개는 하나로, 앞뒤 공백 제거.
+// 100자를 넘으면 자른다(한글 입력 중에 칸 제한을 넘는 휴대폰이 있어서).
+function normalizeMemo(text) {
+  let m = String(text || "")
+    .replace(/[\u0000-\u001F\u007F]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (m.length > MEMO_MAX) {
+    m = m.slice(0, MEMO_MAX);
+    if (/[\uD800-\uDBFF]$/.test(m)) m = m.slice(0, -1); // 이모지 반쪽이 남지 않게
+    m = m.trim();
+  }
+  return m;
+}
+
+function initialSubmitted(notice) {
+  return Boolean(notice.myResponse && notice.myResponse.submitted === true);
+}
+
+function initialChoice(notice, items) {
+  const c = notice.myResponse ? notice.myResponse.choice : null;
+  return Number.isInteger(c) && c >= 0 && c < items.length ? c : null;
+}
+
+function initialMemo(notice) {
+  if (!notice.memoAllowed) return "";
+  const m = notice.myResponse ? notice.myResponse.memo : "";
+  return typeof m === "string" ? m : "";
 }
 
 function isClosed(notice) {
@@ -1059,16 +1105,26 @@ function initialChecked(notice, items) {
   return sortedList(new Set(mine.filter((i) => Number.isInteger(i) && i >= 0 && i < items.length)));
 }
 
-// 카드에 보일 내 상태: 학생이 이번에 만진 체크가 있으면 그것을, 없으면 서버 기록을 본다.
+// 카드에 보일 내 상태: 학생이 이번에 만진 응답이 있으면 그것을, 없으면 서버 기록을 본다.
+// [미응답] 탭 개수도 이것의 done으로 센다(모든 유형).
 function progressOf(notice) {
-  if (!isChecklist(notice)) {
-    if (notice.type === "CHECKLIST") return { total: 0, count: 0, done: true, failed: false }; // 항목 없는 공지: 읽기만
-    return { total: 0, count: 0, done: Boolean(notice.myResponse && notice.myResponse.done), failed: false };
-  }
-  const items = itemsOf(notice);
+  const kind = kindOf(notice);
   const entry = entries.get(notice.id);
-  const count = entry ? entry.checked.size : initialChecked(notice, items).length;
-  return { total: items.length, count, done: count === items.length, failed: Boolean(entry && entry.phase === "failed") };
+  const failed = Boolean(entry && entry.phase === "failed");
+  const items = itemsOf(notice);
+  if (kind === "READONLY") return { kind, done: true, failed: false }; // 항목 없는 체크 공지: 읽기만
+  if (kind === "CHECKLIST") {
+    const count = entry ? entry.checked.size : initialChecked(notice, items).length;
+    return { kind, total: items.length, count, done: count === items.length, failed };
+  }
+  if (kind === "SUBMIT") {
+    return { kind, done: entry ? entry.submitted : initialSubmitted(notice), failed };
+  }
+  if (kind === "POLL") {
+    const choice = entry ? entry.choice : initialChoice(notice, items);
+    return { kind, done: choice !== null, choiceText: choice !== null ? items[choice] : "", failed };
+  }
+  return { kind, done: Boolean(notice.myResponse && notice.myResponse.done), failed: false };
 }
 
 function countTodo() {
@@ -1115,12 +1171,39 @@ function dueBadge(notice, closed, extraClass) {
   );
 }
 
+function stateText(text) {
+  return h("span", { class: "state-text" }, text); // 긴 선택지는 말줄임(…)으로 자른다
+}
+
 function statusChip(p, closed) {
   if (p.failed) return h("span", { class: "state state-bad" }, icon("alert", 14), "저장 안 됨");
+  if (p.kind === "SUBMIT") {
+    if (p.done) return h("span", { class: "state state-ok" }, icon("check", 14), "제출함");
+    if (closed) return h("span", { class: "state state-past" }, "제출 표시 안 함");
+    return h("span", { class: "state state-todo" }, "아직 제출 표시 안 함");
+  }
+  if (p.kind === "POLL") {
+    if (p.done) return h("span", { class: "state state-ok" }, icon("check", 14), stateText("응답함 · " + p.choiceText));
+    if (closed) return h("span", { class: "state state-past" }, "고르지 않았어요");
+    return h("span", { class: "state state-todo" }, "아직 안 골랐어요");
+  }
   if (p.done) return h("span", { class: "state state-ok" }, icon("check", 14), "완료");
   if (closed) return h("span", { class: "state state-past" }, "끝내지 못했어요");
   if (p.total && p.count > 0) return h("span", { class: "state state-todo" }, `체크 ${p.total - p.count}개 남음`);
   return h("span", { class: "state state-todo" }, "아직 안 했어요");
+}
+
+// 카드 버튼 글자: 제출·투표는 시안 ②대로 '제출 표시'·'응답하기' / '내 응답 보기 >', 항목 체크는 단계 2 그대로.
+function cardButtonLabel(p, closed) {
+  const todo = !closed && !p.done;
+  const answerable = p.kind === "SUBMIT" || p.kind === "POLL";
+  if (todo) {
+    if (p.kind === "SUBMIT") return { text: "제출 표시", chevron: false };
+    if (p.kind === "POLL") return { text: "응답하기", chevron: false };
+    return { text: "확인하기", chevron: true };
+  }
+  if (answerable && p.done) return { text: "내 응답 보기", chevron: true };
+  return { text: "보기", chevron: true };
 }
 
 function noticeCard(notice) {
@@ -1128,11 +1211,16 @@ function noticeCard(notice) {
   const closed = isClosed(notice);
   const titleId = "nt" + ++idSeq;
   const todo = !closed && !p.done;
+  const label = cardButtonLabel(p, closed);
   const btn = h(
     "button",
-    { type: "button", class: "btn-card" + (todo ? " btn-card-primary" : ""), "aria-describedby": titleId },
-    todo ? "확인하기" : "보기",
-    icon("chevronRight", 16)
+    {
+      type: "button",
+      class: "btn-card" + (todo ? " btn-card-primary" : "") + (label.chevron ? "" : " btn-card-plain"),
+      "aria-describedby": titleId,
+    },
+    label.text,
+    label.chevron ? icon("chevronRight", 16) : null
   );
   if (boardRefs) boardRefs.buttons.set(notice.id, btn);
   // 카드 어디를 눌러도 상세로 간다(안의 버튼을 눌러도 이 한 곳에서 처리).
@@ -1449,27 +1537,43 @@ function goBackToBoard() {
 }
 
 function responseSection(notice) {
-  if (isChecklist(notice)) return checklistCard(getEntry(notice));
-  if (notice.type === "CHECKLIST") return null; // 체크 항목이 없는 공지: 읽기만
-  return h(
-    "p",
-    { class: "note note-muted" },
-    icon("info", 18),
-    "이 공지의 응답은 아직 이 화면에서 할 수 없어요. 화면을 새로고침해 보세요."
-  );
+  const kind = kindOf(notice);
+  if (kind === "READONLY") return null; // 체크 항목이 없는 공지: 읽기만
+  if (!kind) {
+    return h(
+      "p",
+      { class: "note note-muted" },
+      icon("info", 18),
+      "이 공지의 응답은 아직 이 화면에서 할 수 없어요. 화면을 새로고침해 보세요."
+    );
+  }
+  const entry = getEntry(notice);
+  if (kind === "CHECKLIST") return checklistCard(entry);
+  if (kind === "SUBMIT") return submitCard(entry);
+  return pollCard(entry);
 }
 
 function getEntry(notice) {
   let entry = entries.get(notice.id);
   if (entry) return entry;
+  const kind = kindOf(notice);
   const items = itemsOf(notice);
-  const initial = initialChecked(notice, items);
+  const memo = kind === "CHECKLIST" ? "" : initialMemo(notice);
   entry = {
     id: notice.id,
+    kind, // CHECKLIST | SUBMIT | POLL
     items,
+    sig: noticeSig(notice),
+    memoAllowed: kind !== "CHECKLIST" && Boolean(notice.memoAllowed),
     session: sessionGen,
-    checked: new Set(initial), // 화면에 보이는(학생이 원하는) 상태
-    saved: initial, // 서버가 마지막으로 확인해 준 상태
+    // ---- 화면에 보이는(학생이 원하는) 상태. 유형마다 쓰는 칸이 다르다. ----
+    checked: new Set(kind === "CHECKLIST" ? initialChecked(notice, items) : []), // 항목 체크
+    submitted: initialSubmitted(notice), // 제출 표시
+    choice: initialChoice(notice, items), // 투표(고른 선택지 번호, 없으면 null)
+    memo, // 저장하기로 정한 메모(정리된 글자)
+    draft: memo, // 메모 칸에 지금 쓰여 있는 글자(아직 저장 버튼을 안 눌렀을 수 있음)
+    // ----
+    saved: null, // 서버가 마지막으로 확인해 준 상태(바로 아래에서 채움)
     hadResponse: Boolean(notice.myResponse),
     closed: Boolean(notice.closed),
     inFlight: false, // 저장 요청을 보내는 중인지(재시도 대기 포함)
@@ -1477,16 +1581,53 @@ function getEntry(notice) {
     error: null,
     view: null, // 상세 화면이 열려 있을 때 그 화면의 요소들
   };
+  entry.saved = snapshotOf(entry);
   entries.set(notice.id, entry);
   return entry;
 }
+
+/* ---------- 응답 카드 공통 조각 ---------- */
+
+// 저장 상태(오른쪽 위 작은 글자)와 저장 실패 안내 상자
+function addSaveBits(entry, v) {
+  v.save = h("span", { class: "save-state", role: "status", "aria-live": "polite" });
+  v.failText = h("p", null);
+  v.retry = button("btn btn-danger", "다시 시도", { before: "refresh", size: 18, onclick: () => retrySave(entry) });
+  v.fail = h("div", { class: "save-fail", role: "alert", hidden: true }, v.failText, v.retry);
+}
+
+function paintPill(badge, done, closed, todoText, pastText) {
+  badge.textContent = "";
+  if (done) {
+    badge.className = "pill pill-ok";
+    appendAll(badge, [icon("check", 12), "완료"]);
+  } else if (closed) {
+    badge.className = "pill pill-past";
+    badge.textContent = pastText;
+  } else {
+    badge.className = "pill pill-soon";
+    badge.textContent = todoText;
+  }
+}
+
+function paintFoot(foot, closed, openText, closedText) {
+  foot.textContent = "";
+  appendAll(foot, closed ? [icon("lock", 15), closedText] : [icon("info", 15), openText]);
+}
+
+// 키보드(Enter·Space)로 누른 버튼인지. 손가락·마우스로 누르면 detail이 1 이상이다.
+function byKeyboard(e) {
+  return !e || e.detail === 0;
+}
+
+/* ---------- 항목 체크 카드 (시안 ③) ---------- */
 
 function checklistCard(entry) {
   const base = "chk" + ++idSeq;
   const v = { rows: [] };
   v.bar = h("div", { class: "check-bar" });
   v.badge = h("span", { class: "pill" });
-  v.save = h("span", { class: "save-state", role: "status", "aria-live": "polite" });
+  addSaveBits(entry, v);
 
   const list = h("ul", { class: "check-list" });
   entry.items.forEach((text, i) => {
@@ -1497,9 +1638,6 @@ function checklistCard(entry) {
     v.rows.push({ input, label });
   });
 
-  v.failText = h("p", null);
-  v.retry = button("btn btn-danger", "다시 시도", { before: "refresh", size: 18, onclick: () => retrySave(entry) });
-  v.fail = h("div", { class: "save-fail", role: "alert", hidden: true }, v.failText, v.retry);
   v.foot = h("p", { class: "check-foot" });
 
   entry.view = v;
@@ -1515,28 +1653,304 @@ function checklistCard(entry) {
   );
 }
 
-/* ================= 항목 체크: 기다리지 않는 저장 =================
+/* ---------- 제출 표시 카드 ---------- */
+
+function submitCard(entry) {
+  const base = "sub" + ++idSeq;
+  const v = {};
+  v.badge = h("span", { class: "pill" });
+  addSaveBits(entry, v);
+
+  // '낼 것' 목록(제출물 이름)
+  const gives = entry.items.length
+    ? h(
+        "div",
+        { class: "give" },
+        h("p", { class: "resp-label", id: base + "-give" }, "낼 것"),
+        h(
+          "ul",
+          { class: "give-list", "aria-labelledby": base + "-give" },
+          entry.items.map((text) => h("li", { class: "give-row" }, icon("file", 18), h("span", null, text)))
+        )
+      )
+    : null;
+
+  v.submitBtn = button("btn btn-primary btn-lg", "제출했어요", {
+    before: "checkCircle",
+    onclick: () => setSubmitted(entry, true),
+  });
+  // 누른 뒤 같은 자리에 나오는 초록 상자(누르는 칸이 아니라서 두 번 눌러도 취소되지 않는다)
+  v.doneBox = h(
+    "div",
+    { class: "submit-done", tabindex: "-1" },
+    h("span", { class: "submit-done-icon" }, icon("check", 20)),
+    "제출했어요"
+  );
+  v.noneBox = h("p", { class: "submit-none" }, icon("lock", 18), "제출 표시를 하지 않았어요");
+  v.cancelBtn = button("btn btn-sub", "제출 취소", { before: "undo", size: 18, onclick: () => setSubmitted(entry, false) });
+  v.undoRow = h("div", { class: "undo-row" }, h("span", null, "잘못 눌렀다면"), v.cancelBtn);
+
+  v.memo = entry.memoAllowed
+    ? memoBlock(entry, base, {
+        label: "한 줄 메모",
+        save: "메모 저장",
+        pending: "[제출했어요]를 누르면 메모도 함께 저장돼요.",
+        readLabel: "내 메모",
+      })
+    : null;
+  v.foot = h("p", { class: "resp-foot" });
+
+  entry.view = v;
+  renderEntry(entry);
+  return h(
+    "section",
+    { class: "check-card resp-card", "aria-labelledby": base + "-title" },
+    h("div", { class: "check-head" }, h("h2", { id: base + "-title" }, "제출 표시"), v.badge, v.save),
+    gives,
+    v.submitBtn,
+    v.doneBox,
+    v.noneBox,
+    v.undoRow,
+    v.memo ? v.memo.el : null,
+    v.fail,
+    v.foot
+  );
+}
+
+/* ---------- 투표 카드 (시안 ④) ---------- */
+
+function pollCard(entry) {
+  const base = "poll" + ++idSeq;
+  const v = { tiles: [] };
+  v.badge = h("span", { class: "pill" });
+  addSaveBits(entry, v);
+  v.heading = h("h2", { id: base + "-title" }, "하나를 고르세요");
+
+  // 선택지가 모두 짧으면 2열 타일, 하나라도 길면 1열 목록
+  const short = entry.items.every((text) => text.length <= SHORT_CHOICE);
+  const group = h("div", {
+    role: "radiogroup",
+    "aria-labelledby": base + "-title",
+    class: "poll-grid" + (short ? "" : " is-list"),
+  });
+  entry.items.forEach((text, i) => {
+    const input = h("input", { type: "radio", name: base, id: `${base}-${i}`, class: "poll-input" });
+    input.addEventListener("change", () => {
+      if (input.checked) choose(entry, i);
+    });
+    const label = h("label", { class: "poll-tile", for: input.id }, input, h("span", { class: "poll-text" }, text));
+    group.appendChild(label);
+    v.tiles.push({ input, label });
+  });
+
+  v.clearBtn = button("btn btn-sub btn-clear", "선택 지우기", { before: "close", size: 18, onclick: (e) => clearChoice(entry, e) });
+  v.noneBox = h("p", { class: "submit-none" }, icon("lock", 18), "고르지 않았어요");
+  v.memo = entry.memoAllowed
+    ? memoBlock(entry, base, {
+        label: "의견 한 줄",
+        save: "의견 저장",
+        pending: "선택지를 고르면 의견도 함께 저장돼요.",
+        readLabel: "내 의견",
+      })
+    : null;
+  v.foot = h("p", { class: "resp-foot" });
+
+  entry.view = v;
+  renderEntry(entry);
+  return h(
+    "section",
+    { class: "check-card resp-card", "aria-labelledby": base + "-title" },
+    h("div", { class: "check-head" }, v.heading, v.badge, v.save),
+    group,
+    v.noneBox,
+    v.clearBtn,
+    v.memo ? v.memo.el : null,
+    v.fail,
+    v.foot
+  );
+}
+
+/* ---------- 한 줄 메모·의견 칸 ---------- */
+
+function memoBlock(entry, base, text) {
+  const id = base + "-memo";
+  const input = h("input", {
+    id,
+    type: "text",
+    class: "memo-input",
+    maxlength: String(MEMO_MAX),
+    autocomplete: "off",
+    enterkeyhint: "done",
+    placeholder: "개인정보는 쓰지 마세요",
+    "aria-describedby": id + "-hint " + id + "-count",
+  });
+  input.value = entry.draft;
+  const count = h("span", { id: id + "-count", class: "memo-count" });
+  const save = button("btn btn-primary btn-memo", text.save, { onclick: (e) => saveMemo(entry, e) });
+  const pending = h("p", { class: "memo-pending" }, icon("info", 15), text.pending);
+  const readText = h("p", { class: "memo-read-text" });
+  const read = h("div", { class: "memo-read" }, h("p", { class: "resp-label" }, text.readLabel), readText);
+  const edit = h(
+    "div",
+    { class: "memo" },
+    h(
+      "label",
+      { class: "memo-label", for: id },
+      text.label + " ",
+      h("span", { class: "field-label-sub" }, `(선택 · ${MEMO_MAX}자)`)
+    ),
+    input,
+    h(
+      "div",
+      { class: "memo-meta" },
+      h("span", { id: id + "-hint" }, "이름·연락처 같은 개인정보는 쓰지 마세요."),
+      count
+    ),
+    pending,
+    save
+  );
+  input.addEventListener("input", () => {
+    entry.draft = input.value;
+    renderMemo(entry);
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return; // 한글 조합 중 Enter는 그냥 둔다
+    e.preventDefault();
+    if (!save.hidden) saveMemo(entry, null);
+  });
+  return { el: h("div", { class: "memo-wrap" }, edit, read), edit, input, count, save, pending, read, readText };
+}
+
+function renderMemo(entry) {
+  const m = entry.view && entry.view.memo;
+  if (!m) return;
+  const primaryDone = entry.kind === "SUBMIT" ? entry.submitted : entry.choice !== null;
+  m.edit.hidden = entry.closed;
+  // 마감 뒤에는 저장된 메모를 글자로만 보여 준다(없으면 칸을 숨김).
+  m.read.hidden = !entry.closed || !entry.memo;
+  m.readText.textContent = entry.memo;
+  const len = m.input.value.length;
+  m.count.textContent = `${len}/${MEMO_MAX}`;
+  m.count.classList.toggle("is-over", len > MEMO_MAX);
+  const dirty = !entry.closed && normalizeMemo(entry.draft) !== entry.memo;
+  // 제출(또는 선택)한 뒤 메모를 고치면 [메모 저장]. 그 전이면 제출·선택 때 함께 저장된다고 알려 준다.
+  m.save.hidden = !(dirty && primaryDone);
+  m.pending.hidden = !(dirty && !primaryDone);
+}
+
+// 메모 칸의 글자를 '저장하기로 정한 메모'로 확정한다(서버와 같은 규칙으로 정리).
+function commitDraft(entry) {
+  if (!entry.memoAllowed) return;
+  entry.memo = normalizeMemo(entry.draft);
+  entry.draft = entry.memo;
+  const m = entry.view && entry.view.memo;
+  if (m && m.input.value !== entry.memo) m.input.value = entry.memo;
+}
+
+/* ================= 응답 저장: 기다리지 않는 저장 (항목 체크·제출 표시·투표 공통) =================
  * - 누르면 화면은 즉시 바뀌고, 저장은 뒤에서 한다.
  * - 공지 하나당 요청은 한 번에 하나만 보낸다.
- * - 요청이 끝났을 때 화면 상태가 마지막으로 보낸 것과 다르면, 최신 전체 목록을 다시 보낸다.
+ * - 요청이 끝났을 때 화면 상태가 마지막으로 보낸 것과 다르면, 최신 상태 전체를 다시 보낸다.
  *   (그래서 서버에 마지막으로 기록되는 것은 항상 화면의 최신 상태다)
  * - 실패하면 1.5초 뒤 한 번 더 시도하고, 그래도 실패하면 '저장 안 됨'과 [다시 시도]를 보여 준다.
  * - 저장 중에 공지판으로 돌아가도 저장은 계속된다(상태는 로그인 동안 entries에 남는다).
  */
 
-function toggleItem(entry, index, on) {
-  if (entry.closed || entry.session !== sessionGen) {
-    renderEntry(entry);
+// 지금 화면 상태를 서버에 보낼 모양으로 찍어 둔다.
+function snapshotOf(entry) {
+  if (entry.kind === "CHECKLIST") return { checked: sortedList(entry.checked) };
+  if (entry.kind === "SUBMIT") return { submitted: entry.submitted, memo: entry.memo };
+  return { choice: entry.choice, memo: entry.memo };
+}
+
+function sameSnapshot(a, b) {
+  if (a.checked || b.checked) return Boolean(a.checked && b.checked) && sameList(a.checked, b.checked);
+  return a.submitted === b.submitted && a.choice === b.choice && a.memo === b.memo;
+}
+
+// 마감으로 저장이 거절됐을 때: 서버에 마지막으로 저장된 상태로 화면을 되돌린다.
+function restoreSnapshot(entry, snap) {
+  if (entry.kind === "CHECKLIST") {
+    entry.checked = new Set(snap.checked);
     return;
   }
-  if (on) entry.checked.add(index);
-  else entry.checked.delete(index);
+  if (entry.kind === "SUBMIT") entry.submitted = snap.submitted;
+  else entry.choice = snap.choice;
+  entry.memo = snap.memo;
+  entry.draft = snap.memo;
+  const m = entry.view && entry.view.memo;
+  if (m) m.input.value = snap.memo;
+}
+
+function sendSnapshot(entry, snap) {
+  const memo = entry.memoAllowed ? snap.memo : null; // 메모를 받지 않는 공지에는 memo를 아예 넣지 않는다
+  if (entry.kind === "CHECKLIST") return api.saveChecklist(entry.id, snap.checked);
+  if (entry.kind === "SUBMIT") return api.saveSubmit(entry.id, snap.submitted, memo);
+  return api.savePoll(entry.id, snap.choice, memo);
+}
+
+// 학생이 응답을 바꿀 때마다: 화면을 먼저 바꾸고 저장을 건다. 바꿀 수 없는 상태면 false.
+function changeEntry(entry, apply) {
+  if (entry.closed || entry.session !== sessionGen) {
+    renderEntry(entry);
+    return false;
+  }
+  apply();
   if (!entry.inFlight) {
     entry.phase = "idle";
     entry.error = null;
   }
   renderEntry(entry);
   requestSave(entry);
+  return true;
+}
+
+function toggleItem(entry, index, on) {
+  changeEntry(entry, () => {
+    if (on) entry.checked.add(index);
+    else entry.checked.delete(index);
+  });
+}
+
+function setSubmitted(entry, on) {
+  const changed = changeEntry(entry, () => {
+    entry.submitted = on;
+    commitDraft(entry); // 칸에 써 둔 메모도 함께 보낸다
+  });
+  // 누른 버튼이 사라지므로 초점을 옮긴다: 제출 → 초록 상자, 취소 → [제출했어요]
+  const v = entry.view;
+  if (changed && v) focusQuietly(on ? v.doneBox : v.submitBtn);
+}
+
+function choose(entry, index) {
+  if (entry.choice === index) return;
+  changeEntry(entry, () => {
+    entry.choice = index;
+    commitDraft(entry); // 칸에 써 둔 의견도 함께 보낸다
+  });
+}
+
+function clearChoice(entry, e) {
+  const changed = changeEntry(entry, () => {
+    entry.choice = null;
+    commitDraft(entry);
+  });
+  // [선택 지우기]가 사라지므로, 키보드로 눌렀다면 첫 선택지로 초점을 옮긴다.
+  const v = entry.view;
+  if (changed && v && v.tiles.length && byKeyboard(e)) focusQuietly(v.tiles[0].input);
+}
+
+function saveMemo(entry, e) {
+  if (normalizeMemo(entry.draft) === entry.memo) {
+    // 앞뒤 공백만 바뀐 경우: 보낼 것 없이 칸만 정리한다.
+    commitDraft(entry);
+    renderEntry(entry);
+    return;
+  }
+  const changed = changeEntry(entry, () => commitDraft(entry));
+  // [메모 저장]이 사라지므로, 키보드로 눌렀다면 메모 칸으로 초점을 돌려 둔다(손가락이면 자판이 뜨지 않게 그대로).
+  const m = entry.view && entry.view.memo;
+  if (changed && m && byKeyboard(e)) focusQuietly(m.input);
 }
 
 function retrySave(entry) {
@@ -1553,21 +1967,21 @@ function requestSave(entry) {
 }
 
 async function sendLatest(entry, attempt) {
-  const snapshot = sortedList(entry.checked);
+  const snap = snapshotOf(entry);
   entry.inFlight = true;
   entry.phase = attempt === 1 ? "saving" : "retrying";
   renderEntry(entry);
 
-  const res = await api.saveChecklist(entry.id, snapshot);
+  const res = await sendSnapshot(entry, snap);
   if (entry.session !== sessionGen) return; // 그사이 로그아웃·다시 로그인함
 
   if (res.ok) {
-    entry.saved = snapshot;
+    entry.saved = snap;
     entry.hadResponse = true;
     entry.error = null;
     noteTiming([["저장", res.elapsedMs]]);
-    if (!sameList(snapshot, sortedList(entry.checked))) {
-      // 보내는 동안 학생이 또 눌렀다 → 최신 전체 목록을 다시 보낸다.
+    if (!sameSnapshot(snap, snapshotOf(entry))) {
+      // 보내는 동안 학생이 또 바꿨다 → 최신 상태 전체를 다시 보낸다.
       sendLatest(entry, 1);
       return;
     }
@@ -1583,7 +1997,7 @@ async function sendLatest(entry, attempt) {
     // 마감됨: 서버에 마지막으로 저장된 상태로 되돌리고 더는 바꾸지 못하게 한다.
     entry.inFlight = false;
     entry.closed = true;
-    entry.checked = new Set(entry.saved);
+    restoreSnapshot(entry, entry.saved);
     entry.phase = "closed";
     renderEntry(entry);
     if (screen === "board") renderBoardBody();
@@ -1595,7 +2009,7 @@ async function sendLatest(entry, attempt) {
     renderEntry(entry);
     await sleep(RETRY_DELAY_MS);
     if (entry.session !== sessionGen) return;
-    sendLatest(entry, 2); // 기다리는 동안 또 눌렀다면 그 최신 상태를 보낸다.
+    sendLatest(entry, 2); // 기다리는 동안 또 바꿨다면 그 최신 상태를 보낸다.
     return;
   }
 
@@ -1606,9 +2020,18 @@ async function sendLatest(entry, attempt) {
   if (screen === "board") renderBoardBody(); // 공지판 카드에 '저장 안 됨' 표시
 }
 
+/* ---------- 화면 다시 그리기 ---------- */
+
 function renderEntry(entry) {
   const v = entry.view;
   if (!v) return;
+  if (entry.kind === "CHECKLIST") renderChecklist(entry, v);
+  else if (entry.kind === "SUBMIT") renderSubmit(entry, v);
+  else renderPoll(entry, v);
+  renderSaveState(entry, v);
+}
+
+function renderChecklist(entry, v) {
   const total = entry.items.length;
   const count = entry.checked.size;
   const done = count === total;
@@ -1636,7 +2059,53 @@ function renderEntry(entry) {
     v.badge.textContent = `${total - count}개 남음`;
   }
 
-  // 저장 상태(작게, 오른쪽 위)
+  v.foot.textContent = "";
+  if (entry.closed) {
+    appendAll(v.foot, [icon("lock", 15), "마감이 지나 체크를 바꿀 수 없어요."]);
+  } else {
+    appendAll(v.foot, [icon("info", 15), "모두 체크하면 담임 선생님께 확인 완료로 표시돼요."]);
+  }
+}
+
+function renderSubmit(entry, v) {
+  const on = entry.submitted;
+  v.submitBtn.hidden = on || entry.closed;
+  v.doneBox.hidden = !on;
+  v.noneBox.hidden = on || !entry.closed;
+  v.undoRow.hidden = !on || entry.closed; // 마감 뒤에는 바꾸는 버튼을 숨긴다
+  paintPill(v.badge, on, entry.closed, "제출 전", "표시 안 함");
+  renderMemo(entry);
+  paintFoot(
+    v.foot,
+    entry.closed,
+    "실제로 낸 뒤에 눌러 주세요. 마감 전까지 취소할 수 있어요.",
+    "마감이 지나 제출 표시를 바꿀 수 없어요."
+  );
+}
+
+function renderPoll(entry, v) {
+  v.tiles.forEach((tile, i) => {
+    const on = entry.choice === i;
+    tile.input.checked = on;
+    tile.input.disabled = entry.closed;
+    tile.label.classList.toggle("is-on", on);
+    tile.label.classList.toggle("is-locked", entry.closed);
+  });
+  v.heading.textContent = entry.closed ? "내 선택" : "하나를 고르세요";
+  v.clearBtn.hidden = entry.choice === null || entry.closed; // 마감 뒤에는 바꾸는 버튼을 숨긴다
+  v.noneBox.hidden = !(entry.closed && entry.choice === null);
+  paintPill(v.badge, entry.choice !== null, entry.closed, "고르기 전", "고르지 않음");
+  renderMemo(entry);
+  paintFoot(
+    v.foot,
+    entry.closed,
+    "마감 전까지 바꿀 수 있어요. 다른 친구의 선택과 결과는 보이지 않아요.",
+    "마감이 지나 바꿀 수 없어요. 다른 친구의 선택과 결과는 보이지 않아요."
+  );
+}
+
+// 저장 상태(작게, 오른쪽 위)와 저장 실패 안내
+function renderSaveState(entry, v) {
   let saveText = "";
   let saveIcon = null;
   let saveBad = false;
@@ -1656,20 +2125,17 @@ function renderEntry(entry) {
   if (saveText) appendAll(v.save, [saveIcon ? icon(saveIcon, 13) : null, saveText]);
   v.save.classList.toggle("is-bad", saveBad);
 
-  // 저장 실패 안내
   let failText = "";
   if (entry.phase === "failed") failText = saveFailText(entry.error);
-  else if (entry.phase === "closed") failText = "마감이 지나서 저장하지 못했어요. 이제 체크를 바꿀 수 없어요.";
+  else if (entry.phase === "closed") {
+    failText =
+      entry.kind === "CHECKLIST"
+        ? "마감이 지나서 저장하지 못했어요. 이제 체크를 바꿀 수 없어요."
+        : "마감이 지나서 저장하지 못했어요. 마지막으로 저장된 응답을 보여 드려요.";
+  }
   v.fail.hidden = !failText;
   v.failText.textContent = failText;
   v.retry.hidden = !(entry.phase === "failed" && isRetryable(entry.error));
-
-  v.foot.textContent = "";
-  if (entry.closed) {
-    appendAll(v.foot, [icon("lock", 15), "마감이 지나 체크를 바꿀 수 없어요."]);
-  } else {
-    appendAll(v.foot, [icon("info", 15), "모두 체크하면 담임 선생님께 확인 완료로 표시돼요."]);
-  }
 }
 
 /* ================= 시작 ================= */

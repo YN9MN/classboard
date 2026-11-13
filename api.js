@@ -1,6 +1,6 @@
 // 서버와 주고받는 일은 전부 이 파일 한 곳에서 한다.
 // 나중에 저장소를 Supabase 등으로 바꾸면 이 파일만 고치고, 화면 코드(app.js)는 그대로 쓴다.
-// 서버와의 약속은 docs/api.md를 따른다.
+// 서버와의 약속은 docs/api.md를 따른다. (단계 3: 제출 표시·투표 저장 더함)
 //
 // 모든 함수는 서버 답을 그대로 돌려주되, 걸린 시간(elapsedMs, 밀리초)을 덧붙인다.
 //   성공: { ok: true, ..., elapsedMs }
@@ -209,4 +209,20 @@ export function getBoard() {
 /** 항목 체크 저장. checked는 체크된 항목 번호(0부터) 전체 목록. */
 export function saveChecklist(noticeId, checked) {
   return callWithToken({ action: "respond", noticeId, checked });
+}
+
+// 메모는 공지가 메모를 받을 때(memoAllowed)만 글자로 넘긴다. null이면 요청에 넣지 않는다.
+function withMemo(payload, memo) {
+  if (typeof memo === "string") payload.memo = memo;
+  return payload;
+}
+
+/** 제출 표시 저장. submitted: true = [제출했어요], false = [제출 취소]. memo: 한 줄 메모(정리된 글자) 또는 null. */
+export function saveSubmit(noticeId, submitted, memo) {
+  return callWithToken(withMemo({ action: "respond", noticeId, submitted: submitted === true }, memo));
+}
+
+/** 투표 저장. choice: 고른 선택지 번호(0부터), 지우려면 null. memo: 의견 한 줄(정리된 글자) 또는 null. */
+export function savePoll(noticeId, choice, memo) {
+  return callWithToken(withMemo({ action: "respond", noticeId, choice: Number.isInteger(choice) ? choice : null }, memo));
 }

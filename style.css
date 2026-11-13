@@ -488,6 +488,18 @@ button:disabled {
   color: var(--bad-text);
 }
 
+/* '응답함 · (선택지)': 선택지가 길면 말줄임 */
+.state {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.state-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ---------- 공지 카드 ---------- */
 
 .board-body {
@@ -565,6 +577,10 @@ button:disabled {
   border-color: var(--navy);
   background: var(--navy);
   color: #fff;
+}
+
+.btn-card-plain {
+  padding: 0 18px;
 }
 
 .past-toggle {
@@ -1452,6 +1468,299 @@ input::placeholder {
   color: var(--link);
 }
 
+/* ---------- 제출 표시·투표 카드 (단계 3) ---------- */
+
+.resp-card {
+  gap: 12px;
+}
+
+.resp-label {
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.give {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.give-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.give-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--fill);
+  font-size: 16px;
+  line-height: 1.45;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.give-row .icon {
+  color: var(--text-3);
+}
+
+.btn-sub {
+  border-color: var(--sub-btn-line);
+  background: var(--sub-btn);
+  color: var(--text);
+  font-size: 15px;
+}
+
+.btn-sub:active:not(:disabled) {
+  background: #e7e5df;
+}
+
+/* [제출했어요]를 누른 뒤 같은 자리에 나오는 초록 상자 */
+.submit-done {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 56px;
+  margin-top: 6px;
+  padding: 10px 16px;
+  border: 1px solid var(--ok-line);
+  border-radius: 14px;
+  background: var(--ok-bg);
+  color: var(--ok-text);
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.submit-done-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--ok-text);
+  color: #fff;
+}
+
+/* 마감 뒤 '제출 표시를 하지 않았어요' · '고르지 않았어요' */
+.submit-none {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 10px 16px;
+  border-radius: 14px;
+  background: #f0f0ec;
+  color: var(--text-2);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.undo-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px 10px;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+/* 투표 선택지 타일 (시안 ④): 짧으면 2열, 길면 1열 */
+.poll-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.poll-grid.is-list {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.poll-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 64px;
+  padding: 10px 14px;
+  border: 1px solid var(--fill);
+  border-radius: 16px;
+  background: var(--fill);
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1.35;
+  font-weight: 800;
+  text-align: center;
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+
+.poll-grid.is-list .poll-tile {
+  justify-content: flex-start;
+  min-height: 58px;
+  padding: 12px 16px;
+  font-size: 16px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.poll-tile.is-on {
+  border-color: var(--navy);
+  background: var(--navy);
+  color: #fff;
+}
+
+.poll-tile.is-locked {
+  cursor: default;
+}
+
+.poll-tile.is-locked:not(.is-on) {
+  color: var(--text-3);
+}
+
+.poll-input {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--navy);
+  cursor: inherit;
+}
+
+.poll-tile.is-on .poll-input {
+  accent-color: var(--orange);
+}
+
+.poll-input:focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 3px;
+}
+
+.poll-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.btn-clear {
+  align-self: flex-start;
+}
+
+/* 한 줄 메모·의견 */
+.memo-wrap,
+.memo,
+.memo-read {
+  display: flex;
+  flex-direction: column;
+}
+
+.memo-wrap {
+  gap: 12px;
+}
+
+.memo {
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.memo-read {
+  gap: 6px;
+}
+
+.memo-label {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.memo-input {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: var(--fill);
+  font-size: 16px; /* 16px보다 작으면 아이폰이 화면을 확대한다 */
+}
+
+.memo-input:focus,
+.memo-input:focus-visible {
+  outline: none;
+  border-color: var(--navy);
+  box-shadow: inset 0 0 0 1px var(--navy);
+  background: #fff;
+}
+
+.memo-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.memo-count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.memo-count.is-over {
+  color: var(--bad-text);
+  font-weight: 700;
+}
+
+.memo-pending {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--amber-text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.memo-pending .icon {
+  margin-top: 2px;
+  color: var(--link);
+}
+
+.btn-memo {
+  align-self: flex-end;
+}
+
+.memo-read-text {
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: var(--fill);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.resp-foot {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 2px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.resp-foot .icon {
+  margin-top: 2px;
+  color: var(--link);
+}
+
 /* ---------- 움직임 줄이기 설정을 켠 학생 ---------- */
 
 @media (prefers-reduced-motion: reduce) {
@@ -1459,7 +1768,8 @@ input::placeholder {
     animation: none;
   }
   .ncard,
-  .check-bar {
+  .check-bar,
+  .poll-tile {
     transition: none;
   }
   .ncard:active {
