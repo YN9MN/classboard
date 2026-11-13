@@ -4,23 +4,23 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
-  <meta name="theme-color" content="#f2f4f7">
+  <meta name="theme-color" content="#FBFAF7">
   <meta name="robots" content="noindex, nofollow">
   <meta name="referrer" content="no-referrer">
   <title>우리 반 공지판</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a64d6'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' stroke='white' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%2313203A'/%3E%3Cpath d='M16 7a6.5 6.5 0 0 0-6.5 6.5v3.9l-1.7 3A1 1 0 0 0 8.7 22h14.6a1 1 0 0 0 .9-1.6l-1.7-3v-3.9A6.5 6.5 0 0 0 16 7zm-2.5 16.3a2.6 2.6 0 0 0 5 0z' fill='white'/%3E%3Ccircle cx='25' cy='7' r='4' fill='%23F59E0B'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
   <!-- 화면 로직. 서버와 주고받는 일은 api.js, 서버 주소는 config.js에 있다. -->
   <script type="module" src="app.js"></script>
 </head>
 <body>
   <main id="app" class="app">
-    <p class="loading">불러오는 중…</p>
+    <p class="boot">불러오는 중…</p>
   </main>
   <!-- 아주 오래된 브라우저(모듈을 못 읽는 브라우저)에서만 실행된다. -->
   <script nomodule>
     document.getElementById("app").innerHTML =
-      '<p class="loading">이 브라우저에서는 열 수 없어요.<br>휴대폰의 기본 브라우저(크롬, 사파리)로 열어 주세요.</p>';
+      '<p class="boot">이 브라우저에서는 열 수 없어요.<br>휴대폰의 기본 브라우저(크롬, 사파리)로 열어 주세요.</p>';
   </script>
 </body>
 </html>
